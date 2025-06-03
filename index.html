@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rescue Line Ball Dropper</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  #canvas { border: 2px solid black; background: white; display: block; margin: 10px auto; }
+  #controls { text-align: center; margin: 10px; }
+  label { margin: 0 10px; }
+  #error { color: red; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h2 style="text-align:center;">Rescue Line Ball Dropper</h2>
+
+<div id="controls">
+  <label><input type="checkbox" id="cornerA" /> A</label>
+  <label><input type="checkbox" id="cornerB" /> B</label>
+  <label><input type="checkbox" id="cornerC" /> C</label>
+  <label><input type="checkbox" id="cornerD" /> D</label>
+  <button id="dropBtn">Drop!</button>
+</div>
+
+<div id="error"></div>
+<canvas id="canvas" width="600" height="450"></canvas>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const FIELD_WIDTH = 600;   // mm, half size of original 900x1200 => scaled 600x450 for 900x1200->600x450
+const FIELD_HEIGHT = 450;  // mm
+const GRID_SIZE = 150;     // 300/2 = 150mm grid size (half size)
+const BALL_DIAMETER = 13;  // mm
+const BALL_RADIUS = BALL_DIAMETER / 2;
+const WALL_THICKNESS = 10;
+
+const corners = ['A','B','C','D'];
+
+// Triangle corners coordinates
+// Right is +x, down is +y
+// A=top-left, B=top-right, C=bottom-right, D=bottom-left
+// Each triangle is right isosceles triangle 300x300 scaled to 150x150
+const TRIANGLES = {
+  A: [ {x:0, y:0}, {x:GRID_SIZE, y:0}, {x:0, y:GRID_SIZE} ],
+  B: [ {x:FIELD_WIDTH, y:0}, {x:FIELD_WIDTH - GRID_SIZE, y:0}, {x:FIELD_WIDTH, y:GRID_SIZE} ],
+  C: [ {x:FIELD_WIDTH, y:FIELD_HEIGHT}, {x:FIELD_WIDTH - GRID_SIZE, y:FIELD_HEIGHT}, {x:FIELD_WIDTH, y:FIELD_HEIGHT - GRID_SIZE} ],
+  D: [ {x:0, y:FIELD_HEIGHT}, {x:GRID_SIZE, y:FIELD_HEIGHT}, {x:0, y:FIELD_HEIGHT - GRID_SIZE} ],
+};
+
+let activeCorners = [];
+
+const BALL_COLORS = ['silver', 'silver', 'black']; // 2 silver balls, 1 black ball
+
+let balls = [];
+
+const errorDiv = document.getElementById('error');
+
+function drawGrid(){
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 1;
+  for(let x=0; x<=FIELD_WIDTH; x += GRID_SIZE){
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, FIELD_HEIGHT);
+    ctx.stroke();
+  }
+  for(let y=0; y<=FIELD_HEIGHT; y += GRID_SIZE){
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(FIELD_WIDTH, y);
+    ctx.stroke();
+  }
+}
+
+function drawWalls(){
+  ctx.strokeStyle = 'black';
+  ctx.lineWidth = WALL_THICKNESS;
+  ctx.strokeRect(0, 0, FIELD_WIDTH, FIELD_HEIGHT);
+}
+
+function drawTriangle(corner){
+  const pts = TRIANGLES[corner];
+  ctx.fillStyle = 'rgba(255,0,0,0.3)';
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  ctx.lineTo(pts[1].x, pts[1].y);
+  ctx.lineTo(pts[2].x, pts[2].y);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw label near corner
+  ctx.fillStyle = 'red';
+  ctx.font = '20px Arial';
+  let labelX = pts[0].x;
+  let labelY = pts[0].y;
+  // Adjust label position so it's visible inside canvas
+  if(corner === 'A') { labelX += 10; labelY += 25; }
+  else if(corner === 'B') { labelX -= 20; labelY += 25; }
+  else if(corner === 'C') { labelX -= 20; labelY -= 10; }
+  else if(corner === 'D') { labelX += 10; labelY -= 10; }
+  ctx.fillText(corner, labelX, labelY);
+}
+
+function pointInTriangle(px, py, tri){
+  // Barycentric technique
+  const [A, B, C] = tri;
+  const v0 = {x:C.x - A.x, y:C.y - A.y};
+  const v1 = {x:B.x - A.x, y:B.y - A.y};
+  const v2 = {x:px - A.x, y:py - A.y};
+
+  const dot00 = v0.x * v0.x + v0.y * v0.y;
+  const dot01 = v0.x * v1.x + v0.y * v1.y;
+  const dot02 = v0.x * v2.x + v0.y * v2.y;
+  const dot11 = v1.x * v1.x + v1.y * v1.y;
+  const dot12 = v1.x * v2.x + v1.y * v2.y;
+
+  const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+  const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+  const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+  return (u >= 0) && (v >= 0) && (u + v <= 1);
+}
+
+// Calculate squared distance from point (px,py) to segment AB
+function distPointToSegmentSquared(px, py, ax, ay, bx, by){
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx*abx + aby*aby;
+  let t = (apx*abx + apy*aby) / abLenSq;
+  t = Math.max(0, Math.min(1, t));
+  const closestX = ax + t*abx;
+  const closestY = ay + t*aby;
+  const dx = px - closestX;
+  const dy = py - closestY;
+  return dx*dx + dy*dy;
+}
+
+// Check if circle with center cx,cy radius r overlaps triangle pts
+function circleIntersectsTriangle(cx, cy, r, tri){
+  // If center inside triangle
+  if(pointInTriangle(cx, cy, tri)) return true;
+
+  // Check distance to each edge
+  for(let i=0; i<3; i++){
+    const a = tri[i];
+    const b = tri[(i+1)%3];
+    const distSq = distPointToSegmentSquared(cx, cy, a.x, a.y, b.x, b.y);
+    if(distSq <= r*r) return true;
+  }
+  return false;
+}
+
+function isBallInAnyTriangle(x, y){
+  for(let corner of activeCorners){
+    if(circleIntersectsTriangle(x, y, BALL_RADIUS, TRIANGLES[corner])) return true;
+  }
+  return false;
+}
+
+function generateBalls(){
+  balls = [];
+  let attempts = 0;
+  while(balls.length < BALL_COLORS.length){
+    if(attempts > 1000){
+      errorDiv.textContent = "Failed to place balls without collision after many attempts.";
+      return false;
+    }
+    const x = WALL_THICKNESS + BALL_RADIUS + Math.random() * (FIELD_WIDTH - 2*(WALL_THICKNESS + BALL_RADIUS));
+    const y = WALL_THICKNESS + BALL_RADIUS + Math.random() * (FIELD_HEIGHT - 2*(WALL_THICKNESS + BALL_RADIUS));
+
+    // Check collision with triangles
+    if(isBallInAnyTriangle(x, y)) {
+      attempts++;
+      continue;
+    }
+
+    // Check collision with existing balls
+    let collides = false;
+    for(let b of balls){
+      const dx = b.x - x;
+      const dy = b.y - y;
+      const distSq = dx*dx + dy*dy;
+      if(distSq < (BALL_DIAMETER*BALL_DIAMETER)){
+        collides = true;
+        break;
+      }
+    }
+    if(collides){
+      attempts++;
+      continue;
+    }
+
+    balls.push({x, y, color: BALL_COLORS[balls.length]});
+  }
+  errorDiv.textContent = "";
+  return true;
+}
+
+function drawBalls(){
+  for(let b of balls){
+    ctx.beginPath();
+    ctx.fillStyle = b.color;
+    ctx.arc(b.x, b.y, BALL_RADIUS, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function redraw(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
+  drawWalls();
+  for(let c of activeCorners){
+    drawTriangle(c);
+  }
+  drawBalls();
+}
+
+function onCheckboxChange(event){
+  const cb = event.target;
+  const corner = cb.id.slice(-1);
+
+  if(cb.checked){
+    if(activeCorners.length >= 2){
+      // More than 2 selected: remove last selected corner before this one
+      const last = activeCorners[activeCorners.length-1];
+      activeCorners.pop();
+      document.getElementById('corner' + last).checked = false;
+    }
+    activeCorners.push(corner);
+  } else {
+    // unchecked: remove from activeCorners
+    activeCorners = activeCorners.filter(c => c !== corner);
+  }
+  redraw();
+}
+
+function onDrop(){
+  if(activeCorners.length !== 2){
+    errorDiv.textContent = "Error: 選択できる避難場所は2つまでです!";
+    return;
+  }
+  // Generate balls respecting active corners
+  if(generateBalls()){
+    errorDiv.textContent = "";
+    redraw();
+  }
+}
+
+// Initialize event listeners
+for(let c of corners){
+  document.getElementById('corner' + c).addEventListener('change', onCheckboxChange);
+}
+
+document.getElementById('dropBtn').addEventListener('click', onDrop);
+
+// Initial draw
+redraw();
+
+</script>
+
+</body>
+</html>
