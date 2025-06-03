@@ -1,6 +1,168 @@
 <!DOCTYPE html>
 <html lang="en">
+<head><!DOCTYPE html>
+<html lang="ja">
 <head>
+  <meta charset="UTF-8" />
+  <title>Rescue Line Evacuation zone arrengement tool</title>
+  <style>
+    canvas {
+      border: 1px solid #ccc;
+    }
+    .controls {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h3>Rescue Line Evacuation zone arrengement tool</h3>
+  <canvas id="field" width="600" height="450"></canvas>
+  <div class="controls">
+    <label><input type="checkbox" class="corner-option" value="A" checked> A</label>
+    <label><input type="checkbox" class="corner-option" value="B" checked> B</label>
+    <label><input type="checkbox" class="corner-option" value="C" checked> C</label>
+    <label><input type="checkbox" class="corner-option" value="D" checked> D</label>
+    <br>
+    <small>✓を付けた角の中からランダムに赤と緑の三角コーナーが1つずつ選ばれます。 / Corners with checkmarks are eligible for red and green triangle placement (one each randomly selected).</small>
+    <br>
+    <select id="mode">
+      <option value="balls">ボールのみランダム配置 / Random balls only</option>
+      <option value="both">ボール＋三角コーナーもランダム配置 / Random balls & triangle corners</option>
+    </select>
+    <button onclick="dropBalls()">Drop!</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("field");
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const gridSize = 150;
+    const ballRadius = 13;
+    const corners = ['A', 'B', 'C', 'D'];
+    let redCorner = null;
+    let greenCorner = null;
+    let balls = [];
+
+    function drawGrid() {
+      ctx.strokeStyle = '#eee';
+      for (let x = 0; x <= width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+    }
+
+    function drawCornerLabels() {
+      ctx.fillStyle = 'black';
+      ctx.font = '16px sans-serif';
+      ctx.fillText("A", 5, 15);
+      ctx.fillText("B", width - 15, 15);
+      ctx.fillText("C", width - 15, height - 5);
+      ctx.fillText("D", 5, height - 5);
+    }
+
+    function drawTriangle(corner, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (corner === 'A') {
+        ctx.moveTo(0, 0);
+        ctx.lineTo(gridSize, 0);
+        ctx.lineTo(0, gridSize);
+      } else if (corner === 'B') {
+        ctx.moveTo(width, 0);
+        ctx.lineTo(width - gridSize, 0);
+        ctx.lineTo(width, gridSize);
+      } else if (corner === 'C') {
+        ctx.moveTo(width, height);
+        ctx.lineTo(width - gridSize, height);
+        ctx.lineTo(width, height - gridSize);
+      } else if (corner === 'D') {
+        ctx.moveTo(0, height);
+        ctx.lineTo(gridSize, height);
+        ctx.lineTo(0, height - gridSize);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawBalls() {
+      for (let b of balls) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.fill();
+      }
+    }
+
+    function isInTriangle(x, y, corner) {
+      let px = x, py = y;
+      if (corner === 'A') return px + py <= gridSize;
+      if (corner === 'B') return (width - px) + py <= gridSize;
+      if (corner === 'C') return (width - px) + (height - py) <= gridSize;
+      if (corner === 'D') return px + (height - py) <= gridSize;
+      return false;
+    }
+
+    function placeBalls() {
+      balls = [];
+      const allCorners = [redCorner, greenCorner];
+      const colors = ['silver', 'silver', 'black'];
+      while (balls.length < colors.length) {
+        const x = Math.random() * (width - 2 * ballRadius) + ballRadius;
+        const y = Math.random() * (height - 2 * ballRadius) + ballRadius;
+        const overlap = balls.some(b => Math.hypot(b.x - x, b.y - y) < 2 * ballRadius);
+        const inTriangle = allCorners.some(c => isInTriangle(x, y, c));
+        if (!overlap && !inTriangle) {
+          balls.push({ x, y, color: colors[balls.length] });
+        }
+      }
+    }
+
+    function drawField() {
+      ctx.clearRect(0, 0, width, height);
+      drawGrid();
+      if (redCorner) drawTriangle(redCorner, 'red');
+      if (greenCorner) drawTriangle(greenCorner, 'green');
+      drawCornerLabels();
+      drawBalls();
+    }
+
+    function dropBalls() {
+      const selectedCorners = [...document.querySelectorAll('.corner-option:checked')].map(e => e.value);
+      const mode = document.getElementById("mode").value;
+
+      if (selectedCorners.length < 2) {
+        alert("2つ以上の角を選んでください / Please select at least two corners.");
+        return;
+      }
+      if (selectedCorners.length > 4) {
+        alert("角の数が多すぎます / Too many corners selected.");
+        return;
+      }
+
+      if (mode === 'both') {
+        let choices = [...selectedCorners];
+        let first = choices.splice(Math.floor(Math.random() * choices.length), 1)[0];
+        let second = choices[Math.floor(Math.random() * choices.length)];
+        [redCorner, greenCorner] = Math.random() < 0.5 ? [first, second] : [second, first];
+      }
+      placeBalls();
+      drawField();
+    }
+
+    drawField();
+  </script>
+</body>
+</html>
+
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Rescue Line Ball Dropper</title>
